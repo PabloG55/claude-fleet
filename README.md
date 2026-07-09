@@ -2,143 +2,104 @@
 
 A zellij-native master CLI for running many **Claude Code** sessions in parallel.
 
-If you keep several `claude` sessions open across zellij tabs and different
-checkouts, you know the two pain points:
-
-1. **You miss when one finishes or needs input** — every desktop notification
-   looks identical, so you can't tell *which* session it came from.
-2. **There's no single overview**, and re-attaching a zellij session restarts a
-   **blank** `claude` instead of resuming the conversation that was there.
-
-`claude-fleet` fixes both, without changing how you use zellij.
-
-Every other terminal "fleet" tool (nicknisi/fleet, tmux-claude-session-manager,
-Recon) is tmux-bound; the rest either take over your multiplexer (Claude Squad,
-ccmanager) or are web/cloud dashboards (Omnara). This one is built for zellij and
-leans entirely on what Claude Code already writes to `~/.claude/`.
-
----
-
-## What you get
-
-**1. Identity-rich notifications.** When a session finishes or asks for input,
-you get a macOS notification that names the checkout + branch (+ zellij tab), with
-a different sound for "done" vs "needs you":
+One zellij session per project → **one tab, one pane** → that pane is a **card grid of
+every Claude session in that project**. Arrow to a card, hit Enter, and you're *inside* that
+session full-screen; detach and you're back at the grid. Every session keeps running in the
+background the whole time, so your agents work in parallel while you jump between them.
 
 ```
-✅ Claude — done         claude 3 — superkeyv2 · fix/proposal-template-builder
-🔔 Claude — needs you    claude 2 — superkey-1 · chore/trellis-access
+zellij session "superkey"  →  one pane:
+╭─ claude-fleet [superkey] ──────  2 need you · 1 working ─╮
+│ ╭ superkey ─────────────╮ ╭ superkey-1 ───────────────╮ │
+│ │ ● NEEDS YOU    1m ago  │ │ ● NEEDS YOU        7m ago  │ │
+│ │ fix/proposal-template  │ │ chore/api-vercel-migrate   │ │
+│ │ "Want me to drill…"    │ │ "Save as → Quote then…"    │ │
+│ ╰────────────────────────╯ ╰────────────────────────────╯ │
+│ ╭ superkey-2 ───────────╮ ╭ + new session ─────────────╮ │
+│ │ ◆ working     busy 4m  │ │ start a Claude session     │ │
+│ │ feat/email-signature   │ │ in a checkout…             │ │
+│ ╰────────────────────────╯ ╰────────────────────────────╯ │
+╰ ↑↓←→/hjkl move · ⏎ enter session · n new · q quit ────────╯
 ```
 
-**2. `claude-fleet` — a one-screen overview** of every live session, sorted so the
-ones waiting on you float to the top:
-
-```
- 2 need you · 1 working · 1 ready · 0 idle
- TAB       CHECKOUT      BRANCH                   STATUS     LAST MSG                                     IDLE
- claude 2  superkey-1    chore/trellis-access     NEEDS YOU  Want me to drill into one spec's assertions busy 3m
- claude    superkeyv2    bor-workflow-redesign    working    Verifying the slot state and confirming…    busy 1m
- claude 3  superkeyv2    fix/proposal-…-polish    ready      Churned for 14m 47s                          2m ago
-```
-
-Run `claude-fleet` for a snapshot, or `claude-fleet --watch` for a live view.
-
-**3. Resume after exit.** Launch your fleet from a zellij layout that runs
-`claude-here` in each tab. Kill the whole zellij session and rebuild it with one
-command — every tab comes back **resumed** in the right checkout, not blank.
-
----
+Nothing else is zellij-native like this — every other terminal fleet tool (nicknisi/fleet,
+tmux-claude-session-manager, Recon) is tmux-bound; the rest take over your multiplexer
+(Claude Squad, ccmanager) or are web/cloud dashboards (Omnara).
 
 ## How it works
 
-Claude Code fires [hook events](https://code.claude.com/docs/en/hooks-guide) and
-writes a full JSONL transcript per session to
-`~/.claude/projects/<encoded-cwd>/<session_id>.jsonl`. claude-fleet is three small
-bash pieces on top of that:
+- **One tmux server per zellij session** (`tmux -L cf-<zellij-session>`) is the hidden
+  substrate. It keeps each Claude session alive in the background and handles attach / detach /
+  resize — the battle-tested part. You never interact with tmux directly.
+- **`claude-fleet`** is a tiny loop: it runs the grid, and when you pick a card it hands off to
+  `tmux attach`. Detach (see keys below) and the loop redraws the grid. Node never owns PTYs.
+- **`fleet-grid.mjs`** is a flicker-free Node TUI (zero npm deps). Each card joins three sources:
+  the tmux session list, the per-session status file that the Claude hooks write to
+  `~/.claude/fleet/`, and the last assistant line from the transcript in `~/.claude/projects/`.
+- **`claude-here`** is what each session runs, so sessions resume by checkout.
 
-- **`hooks/fleet-event.sh`** — wired to `UserPromptSubmit`, `Stop`, `Notification`,
-  `SessionStart`, `SessionEnd`. On each event it writes
-  `~/.claude/fleet/<session_id>.json` (`{zellij, slot, cwd, folder, branch,
-  status, transcript, ts}`) and, on Stop/Notification, posts the named
-  notification. It exits `0` no matter what, so it can never break a session.
-- **`bin/claude-fleet`** — reads those status files, pulls the last assistant line
-  from each transcript, prunes dead sessions, and prints the table.
-- **`bin/claude-here`** — resume wrapper used as the pane command in a zellij
-  layout. It finds the session that belongs to this `(zellij session, tab slot)`
-  and `exec claude --resume <id>`; falls back to `claude --continue` for the cwd,
-  or a fresh `claude` if there's nothing to resume.
+Status per card: `● NEEDS YOU` (permission/question) · `◆ working` · `✓ ready` · `· idle`.
+When a session needs you or finishes, you also get a named macOS notification (checkout · branch).
 
-Status values: `working` (turn in progress) · `need-you` (permission / question)
-· `ready` (finished responding) · `idle` (just started).
+## Keys
 
----
+**In the grid:** `↑↓←→` / `hjkl` move · `⏎` enter the selected session · `n` new session ·
+`q` quit to the shell.
+
+**Inside a session:** everything goes to Claude as normal. To pop back to the grid, detach:
+`Ctrl-a` then `g` (mnemonic: **g**rid) — or `Ctrl-a d`. The session keeps running.
+(`Ctrl-a` is the tmux prefix; press it twice to send a literal `Ctrl-a` to Claude.)
 
 ## Install
 
-Requires `jq` and macOS (notifications use `osascript`). zellij is optional but is
-where the resume feature shines.
+Requires `node` (v18+), `jq`, `tmux`, and macOS (notifications use `osascript`).
 
 ```bash
+brew install tmux jq
 git clone https://github.com/PabloG55/claude-fleet.git
 cd claude-fleet
 ./install.sh
 ```
 
-The installer symlinks `claude-fleet` / `claude-here` into `~/.local/bin`, merges
-the hooks into `~/.claude/settings.json` (backing up the old file first), and — if
-you use zellij — links the example layout to `~/.config/zellij/layouts/`.
+The installer symlinks `claude-fleet` / `claude-here` into `~/.local/bin`, wires the status +
+notification hooks into `~/.claude/settings.json` (backing up the old file), and links the
+zellij layout.
 
-Restart your Claude Code sessions so the new hooks load, then run `claude-fleet`.
+## Use it
 
----
-
-## Resume workflow
-
-1. Edit `layouts/superkey.kdl` — one tab per checkout, with the right `cwd` and a
-   stable `slot` arg (`claude`, `claude 2`, …).
-2. Start the fleet:
-   ```bash
-   zellij --layout superkey attach -c superkeyv2
-   ```
-3. Work as usual. When you're done for the day, `zellij kill-session superkeyv2`.
-4. Come back and run the same launch command — every tab resumes its conversation.
-
-### Auto-resume hand-started panes (optional)
-
-The layout covers tabs you launch from it. For panes you open by hand (new tab,
-type `claude`), enable zellij's own serialization + a command-rewrite so those
-resurrect as `claude --continue` too:
+One zellij session per project — the session name scopes the fleet and its tmux server:
 
 ```bash
-./scripts/enable-zellij-resume.sh
+zellij --layout fleet attach -c superkey     # one pane, running the grid
+zellij --layout fleet attach -c getmycoi     # a separate fleet, separate tmux server
 ```
 
-It's idempotent, backs up `~/.config/zellij/config.kdl`, validates with
-`zellij setup --check`, and appends:
+Then press `n` to start a session in a checkout (auto-discovered under `~/<session-name>/*`),
+work in it, detach back to the grid, start another. The two projects never see each other's
+sessions.
 
-```kdl
-// ~/.config/zellij/config.kdl
-session_serialization true
-post_command_discovery_hook "echo $RESURRECT_COMMAND | sed 's/^claude$/claude --continue/'"
-```
-
-Only a bare `claude` is rewritten — `nvim`, shells, `claude --resume …`, and the
-`claude-here` wrapper are left untouched. Restart zellij for it to take effect.
-
----
+Prefer no layout? Just run `claude-fleet` in any zellij pane.
 
 ## Config
 
-| Env var            | Default            | Meaning                                   |
-| ------------------ | ------------------ | ----------------------------------------- |
-| `FLEET_PRUNE_SECS` | `43200` (12h)      | Drop status files older than this.        |
-| `CLAUDE_FLEET_DIR` | `~/.claude/fleet`  | Where status files live.                  |
-| `CLAUDE_FLEET_BIN` | `~/.local/bin`     | Install target for the two commands.       |
+| Env var             | Default            | Meaning                                            |
+| ------------------- | ------------------ | -------------------------------------------------- |
+| `CLAUDE_FLEET_DIR`  | `~/.claude/fleet`  | Where per-session status files live.               |
+| `CLAUDE_FLEET_SCOPE`| `$ZELLIJ_SESSION_NAME` | Override the fleet scope / tmux socket name.   |
+
+`claude-fleet --plain` prints a one-shot, non-interactive table (handy for scripts).
+
+## Extras
+
+- `scripts/enable-zellij-resume.sh` — optional: make hand-started `claude` panes resurrect as
+  `claude --continue` on zellij re-attach.
+- `layouts/superkey.kdl` — the v1 tab-per-checkout layout (each tab runs `claude-here`), kept as
+  an alternative to the single-pane grid.
 
 ## Uninstall
 
-Remove the five hook blocks from `~/.claude/settings.json` (or restore a
-`settings.json.bak.*`), and delete the symlinks in `~/.local/bin`.
+Remove the hook blocks from `~/.claude/settings.json` (or restore a `settings.json.bak.*`),
+delete the symlinks in `~/.local/bin`, and `tmux -L cf-<name> kill-server` for any live fleets.
 
 ## License
 
