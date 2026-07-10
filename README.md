@@ -6,8 +6,8 @@ One zellij session, one pane — `claude-fleet` is the whole control plane, in t
 
 ```
 Projects            →   Project home                →   the session grid
- ▸ superkey              ▸ Master Claude (the lead)      superkey  superkey-1 …
- ▸ getmycoi              ▸ All sessions           ─────▸  ⏎ enter · n new · N parallel
+ ▸ web                   ▸ Master Claude (the lead)      api  api-1  api-2 …
+ ▸ api                   ▸ All sessions           ─────▸  ⏎ enter · n new · N parallel
  ▸ + add project                                          s sched · x kill · q back
 ```
 
@@ -26,8 +26,8 @@ tmux-claude-session-manager, Recon) is tmux-bound; the rest take over your multi
 ## Orchestrate: a lead session driving workers
 
 Because every session lives on the same tmux socket, a "lead" session can dispatch work to
-siblings and read their output — turning a fleet into lead-and-workers (e.g. `getmycoi` handing
-briefs to `getmycoi-1` / `getmycoi-2` worktrees). Three commands, callable from a session's Bash:
+siblings and read their output — turning a fleet into lead-and-workers (e.g. an `api` lead handing
+briefs to `api-1` / `api-2` worktrees). Three commands, callable from a session's Bash:
 
 - **`fleet-list`** — sibling sessions + status (`(you)` marks the caller).
 - **`fleet-send <session> "<prompt>"`** — type a prompt into that session's Claude and submit it
@@ -38,9 +38,9 @@ briefs to `getmycoi-1` / `getmycoi-2` worktrees). Three commands, callable from 
 
 ```bash
 fleet-list
-fleet-send getmycoi-1 "Implement the COI PDF engine in lib/coi/generation/*. Done when tests pass."
-fleet-spawn a4 --branch feat/notifications --prompt "Build the email notification jobs. Done when …"
-fleet-read getmycoi-1 3     # check progress
+fleet-send api-1 "Implement the payments module in src/payments/*. Done when the tests pass."
+fleet-spawn worker4 --branch feat/notifications --prompt "Build the notification jobs. Done when …"
+fleet-read api-1 3     # check progress
 ```
 
 These are also exposed as **MCP tools** (`fleet_list` / `fleet_send` / `fleet_read` / `fleet_spawn`)
@@ -116,9 +116,9 @@ You land on the **Projects** picker. Pick a project → **Master Claude** or **A
 In the grid, `n` starts a session in a checkout, `N` a fresh parallel one, `⏎` enters it,
 `` ` `` comes back, `q` steps up a level.
 
-**Projects** live in `~/.config/claude-fleet/projects` (`name<TAB>path<TAB>profile`), seeded with
-`superkey` and `getmycoi`. Add one from the picker (`+ add project` → browse to a root folder that
-holds your checkouts/worktrees), or edit the file. Jump straight in with `claude-fleet <project>`.
+**Projects** live in `~/.config/claude-fleet/projects` (`name<TAB>path<TAB>profile`). Add your first
+from the picker (`+ add project` → browse to a root folder that holds your checkouts/worktrees), or
+edit the file directly. Jump straight in with `claude-fleet <project>`.
 
 ## Profiles (work vs personal accounts)
 
@@ -129,9 +129,9 @@ the login, `settings.json`, `projects/` (transcripts) and the fleet's `fleet/` s
 
 ```
 # ~/.config/claude-fleet/projects   (name <TAB> path <TAB> profile)
-superkey	~/superkey	work
-getmycoi	~/getmycoi	work
-sideproj	~/Documents/me/sideproj	personal
+web	~/code/web	work
+api	~/code/api	work
+sideproj	~/projects/sideproj	personal
 ```
 
 Each project's sessions live on their own socket (`cf-<project>`) under that account's config dir,
@@ -154,8 +154,6 @@ finds (`~/.claude` and `~/.claude-*`), so both accounts report status.
 
 - `scripts/enable-zellij-resume.sh` — optional: make hand-started `claude` panes resurrect as
   `claude --continue` on zellij re-attach.
-- `layouts/superkey.kdl` — the v1 tab-per-checkout layout (each tab runs `claude-here`), kept as
-  an alternative to the single-pane grid.
 
 ## Uninstall
 
